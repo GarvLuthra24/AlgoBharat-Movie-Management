@@ -45,12 +45,12 @@ func InitDB() {
 		if dbPassword == "" {
 			dbPassword = "password"
 		}
-		dbName := os.Getenv("DB_NAME")
+		dbName := os.Getenv("DB_DATABASE")
 		if dbName == "" {
 			dbName = "algoBharat"
 		}
 
-		dsn = fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
+		dsn = fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local&tls=true",
 			dbUser, dbPassword, dbHost, dbPort, dbName)
 	} else {
 		// SQLite configuration (default)
@@ -76,64 +76,77 @@ func InitDB() {
 func createTables() {
 	createMoviesTable := `
 	CREATE TABLE IF NOT EXISTS movies (
-		id TEXT PRIMARY KEY,
-		title TEXT,
-		duration_minutes INTEGER
-	);
-	`
-	createTheatresTable := `
-	CREATE TABLE IF NOT EXISTS theatres (
-		id TEXT PRIMARY KEY,
-		name TEXT
-	);
-	`
-	createHallsTable := `
-	CREATE TABLE IF NOT EXISTS halls (
-		id TEXT PRIMARY KEY,
-		name TEXT,
-		theatre_id TEXT,
-		seat_map TEXT
-	);
-	`
-	createShowsTable := `
-	CREATE TABLE IF NOT EXISTS shows (
-		id TEXT PRIMARY KEY,
-		movie_id TEXT,
-		hall_id TEXT,
-		time TEXT,
-		price REAL
-	);
-	`
-	createSeatsTable := `
-	CREATE TABLE IF NOT EXISTS seats (
-		id TEXT PRIMARY KEY,
-		row INTEGER,
-		number INTEGER,
-		hall_id TEXT,
-		column INTEGER
-	);
-	`
-	createBookingsTable := `
-	CREATE TABLE IF NOT EXISTS bookings (
-		id TEXT PRIMARY KEY,
-		show_id TEXT,
-		seat_ids TEXT
-	);
-	`
-	createUsersTable := `
-	CREATE TABLE IF NOT EXISTS users (
-		id TEXT PRIMARY KEY,
-		username TEXT UNIQUE NOT NULL,
-		password_hash TEXT NOT NULL,
-		role TEXT NOT NULL
+		id VARCHAR(36) PRIMARY KEY,
+		title VARCHAR(255),
+		duration_minutes INT
 	);
 	`
 
-	_, err := DB.Exec(createMoviesTable + createTheatresTable + createHallsTable + createShowsTable + createSeatsTable + createBookingsTable + createUsersTable)
+	createTheatresTable := `
+	CREATE TABLE IF NOT EXISTS theatres (
+		id VARCHAR(36) PRIMARY KEY,
+		name VARCHAR(255)
+	);
+	`
+
+	createHallsTable := `
+	CREATE TABLE IF NOT EXISTS halls (
+		id VARCHAR(36) PRIMARY KEY,
+		name VARCHAR(255),
+		theatre_id VARCHAR(36),
+		seat_map TEXT
+	);
+	`
+
+	createShowsTable := `
+	CREATE TABLE IF NOT EXISTS shows (
+		id VARCHAR(36) PRIMARY KEY,
+		movie_id VARCHAR(36),
+		hall_id VARCHAR(36),
+		time DATETIME,
+		price DECIMAL(10,2)
+	);
+	`
+
+	createSeatsTable := `
+	CREATE TABLE IF NOT EXISTS seats (
+		id VARCHAR(36) PRIMARY KEY,
+		` + "`row`" + ` INT,
+		` + "`number`" + ` INT,
+		hall_id VARCHAR(36),
+		` + "`column`" + ` INT
+	);
+	`
+
+	createBookingsTable := `
+	CREATE TABLE IF NOT EXISTS bookings (
+		id VARCHAR(36) PRIMARY KEY,
+		show_id VARCHAR(36),
+		seat_ids TEXT
+	);
+	`
+
+	createUsersTable := `
+	CREATE TABLE IF NOT EXISTS users (
+		id VARCHAR(36) PRIMARY KEY,
+		username VARCHAR(255) UNIQUE NOT NULL,
+		password_hash VARCHAR(255) NOT NULL,
+		role VARCHAR(50) NOT NULL
+	);
+	`
+
+	_, err := DB.Exec(createMoviesTable +
+		createTheatresTable +
+		createHallsTable +
+		createShowsTable +
+		createSeatsTable +
+		createBookingsTable +
+		createUsersTable)
 	if err != nil {
 		log.Fatal(err)
 	}
 }
+
 
 func createDefaultAdmin() {
 	// Check if admin user already exists
