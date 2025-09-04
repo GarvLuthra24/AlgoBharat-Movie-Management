@@ -46,6 +46,8 @@ func RegisterRoutes(r *mux.Router, movieHandler *handlers.MovieHandler, theatreH
 	adminRouter.HandleFunc("/theatres/{id}", theatreHandler.DeleteTheatre).Methods("DELETE")
 
 	adminRouter.HandleFunc("/halls", hallHandler.CreateHall).Methods("POST")
+	adminRouter.HandleFunc("/halls/{id}", hallHandler.UpdateHall).Methods("PUT")
+	adminRouter.HandleFunc("/halls/{id}", hallHandler.DeleteHall).Methods("DELETE")
 	adminRouter.HandleFunc("/shows", showHandler.CreateShow).Methods("POST")
 
 	// Only admins can view revenue analytics.

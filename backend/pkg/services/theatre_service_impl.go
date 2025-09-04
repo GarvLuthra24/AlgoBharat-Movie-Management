@@ -3,6 +3,8 @@ package services
 import (
 	"algoBharat/backend/pkg/database"
 	"algoBharat/backend/pkg/models"
+	"fmt"
+	"log"
 	"math/rand"
 	"strconv"
 )
@@ -69,14 +71,143 @@ func (s *TheatreServiceImpl) UpdateTheatre(id string, theatre models.Theatre) (m
 }
 
 func (s *TheatreServiceImpl) DeleteTheatre(id string) error {
-	stmt, err := database.DB.Prepare("DELETE FROM theatres WHERE id = ?")
+	// Check if theatre exists
+	_, err := s.GetTheatre(id)
 	if err != nil {
-		return err
-	}
-	_, err = stmt.Exec(id)
-	if err != nil {
-		return err
+		return fmt.Errorf("theatre not found: %w", err)
 	}
 
+	// Get all halls for this theatre
+	hallRows, err := database.DB.Query("SELECT id FROM halls WHERE theatre_id = ?", id)
+	if err != nil {
+		return fmt.Errorf("error getting halls for theatre: %w", err)
+	}
+	defer hallRows.Close()
+
+	var hallIDs []string
+	for hallRows.Next() {
+		var hallID string
+		if err := hallRows.Scan(&hallID); err != nil {
+			continue
+		}
+		hallIDs = append(hallIDs, hallID)
+	}
+
+	// Get all shows for halls in this theatre
+	var showIDs []string
+	if len(hallIDs) > 0 {
+		// Build the IN clause for hall IDs
+		placeholders := make([]string, len(hallIDs))
+		args := make([]interface{}, len(hallIDs))
+		for i, hallID := range hallIDs {
+			placeholders[i] = "?"
+			args[i] = hallID
+		}
+
+		placeholdersStr := ""
+		for i, placeholder := range placeholders {
+			if i > 0 {
+				placeholdersStr += ","
+			}
+			placeholdersStr += placeholder
+		}
+
+		showRows, err := database.DB.Query(fmt.Sprintf("SELECT id FROM shows WHERE hall_id IN (%s)", placeholdersStr), args...)
+		if err != nil {
+			log.Printf("Warning: error getting shows for theatre %s: %v", id, err)
+		} else {
+			defer showRows.Close()
+			for showRows.Next() {
+				var showID string
+				if err := showRows.Scan(&showID); err != nil {
+					continue
+				}
+				showIDs = append(showIDs, showID)
+			}
+		}
+	}
+
+	// Delete all bookings for shows in this theatre
+	if len(showIDs) > 0 {
+		placeholders := make([]string, len(showIDs))
+		args := make([]interface{}, len(showIDs))
+		for i, showID := range showIDs {
+			placeholders[i] = "?"
+			args[i] = showID
+		}
+
+		placeholdersStr := ""
+		for i, placeholder := range placeholders {
+			if i > 0 {
+				placeholdersStr += ","
+			}
+			placeholdersStr += placeholder
+		}
+
+		_, err = database.DB.Exec(fmt.Sprintf("DELETE FROM bookings WHERE show_id IN (%s)", placeholdersStr), args...)
+		if err != nil {
+			log.Printf("Warning: error deleting bookings for theatre %s: %v", id, err)
+		}
+	}
+
+	// Delete all shows for halls in this theatre
+	if len(hallIDs) > 0 {
+		placeholders := make([]string, len(hallIDs))
+		args := make([]interface{}, len(hallIDs))
+		for i, hallID := range hallIDs {
+			placeholders[i] = "?"
+			args[i] = hallID
+		}
+
+		placeholdersStr := ""
+		for i, placeholder := range placeholders {
+			if i > 0 {
+				placeholdersStr += ","
+			}
+			placeholdersStr += placeholder
+		}
+
+		_, err = database.DB.Exec(fmt.Sprintf("DELETE FROM shows WHERE hall_id IN (%s)", placeholdersStr), args...)
+		if err != nil {
+			log.Printf("Warning: error deleting shows for theatre %s: %v", id, err)
+		}
+	}
+
+	// Delete all seats for halls in this theatre
+	if len(hallIDs) > 0 {
+		placeholders := make([]string, len(hallIDs))
+		args := make([]interface{}, len(hallIDs))
+		for i, hallID := range hallIDs {
+			placeholders[i] = "?"
+			args[i] = hallID
+		}
+
+		placeholdersStr := ""
+		for i, placeholder := range placeholders {
+			if i > 0 {
+				placeholdersStr += ","
+			}
+			placeholdersStr += placeholder
+		}
+
+		_, err = database.DB.Exec(fmt.Sprintf("DELETE FROM seats WHERE hall_id IN (%s)", placeholdersStr), args...)
+		if err != nil {
+			log.Printf("Warning: error deleting seats for theatre %s: %v", id, err)
+		}
+	}
+
+	// Delete all halls for this theatre
+	_, err = database.DB.Exec("DELETE FROM halls WHERE theatre_id = ?", id)
+	if err != nil {
+		return fmt.Errorf("error deleting halls for theatre: %w", err)
+	}
+
+	// Delete the theatre
+	_, err = database.DB.Exec("DELETE FROM theatres WHERE id = ?", id)
+	if err != nil {
+		return fmt.Errorf("error deleting theatre: %w", err)
+	}
+
+	log.Printf("Theatre %s and its %d halls, %d shows deleted successfully", id, len(hallIDs), len(showIDs))
 	return nil
 }

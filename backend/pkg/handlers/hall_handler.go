@@ -58,6 +58,35 @@ func (h *HallHandler) CreateHall(w http.ResponseWriter, r *http.Request) {
 	utils.RespondJSON(w, http.StatusCreated, createdHall)
 }
 
+// UpdateHall handles the PUT /halls/{id} request.
+func (h *HallHandler) UpdateHall(w http.ResponseWriter, r *http.Request) {
+	params := mux.Vars(r)
+	var hall models.Hall
+	if err := json.NewDecoder(r.Body).Decode(&hall); err != nil {
+		utils.RespondError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	hall.ID = params["id"] // Ensure the ID from URL is used
+	updatedHall, err := h.service.UpdateHall(hall)
+	if err != nil {
+		utils.RespondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	utils.RespondJSON(w, http.StatusOK, updatedHall)
+}
+
+// DeleteHall handles the DELETE /halls/{id} request.
+func (h *HallHandler) DeleteHall(w http.ResponseWriter, r *http.Request) {
+	params := mux.Vars(r)
+	err := h.service.DeleteHall(params["id"])
+	if err != nil {
+		utils.RespondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	utils.RespondJSON(w, http.StatusOK, map[string]string{"message": "Hall deleted successfully"})
+}
+
 // GetHallSeats handles the GET /halls/{id}/seats request.
 func (h *HallHandler) GetHallSeats(w http.ResponseWriter, r *http.Request) {
 	params := mux.Vars(r)
