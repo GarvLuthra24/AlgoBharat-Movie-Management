@@ -1,0 +1,47 @@
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+.layout {
+  min-height: 100vh; /* Ensure layout takes full viewport height */
+}
+
+/* Remove default Vite/React logo styles */
+.logo {
+  height: auto;
+  padding: 0;
+  will-change: unset;
+  transition: unset;
+}
+.logo:hover {
+  filter: unset;
+}
+.logo.react:hover {
+  filter: unset;
+}
+
+@keyframes logo-spin {
+  from {
+    transform: unset;
+  }
+  to {
+    transform: unset;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  a:nth-of-type(2) .logo {
+    animation: unset;
+  }
+}
+
+.card {
+  padding: unset;
+}
+
+.read-the-docs {
+  color: unset;
+}
