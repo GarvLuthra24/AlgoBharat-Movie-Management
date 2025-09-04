@@ -5,6 +5,7 @@ import (
 	"algoBharat/backend/pkg/utils"
 	"encoding/json"
 	"net/http"
+	"strings"
 )
 
 // BookingHandler handles HTTP requests for bookings.
@@ -27,7 +28,9 @@ func (h *BookingHandler) CreateBooking(w http.ResponseWriter, r *http.Request) {
 
 	createdBooking, err := h.service.CreateBooking(request)
 	if err != nil {
-		if _, ok := err.(*services.ErrNoContiguousSeats); ok {
+		// Check if it's a no contiguous seats error or show not found error
+		if _, ok := err.(*services.ErrNoContiguousSeats); ok ||
+			(err != nil && (strings.Contains(err.Error(), "no show found") || strings.Contains(err.Error(), "no contiguous seats"))) {
 			alternatives, altErr := h.service.FindAlternativeShows(request.Time, request.NumSeats)
 			if altErr != nil {
 				utils.RespondError(w, http.StatusInternalServerError, "Seats are booked and failed to find alternatives")
@@ -39,7 +42,7 @@ func (h *BookingHandler) CreateBooking(w http.ResponseWriter, r *http.Request) {
 					"alternatives": alternatives,
 				})
 			} else {
-				utils.RespondJSON(w, http.StatusConflict, map[string]string{"message": "Could not book seats together for the requested show, and no same-day alternatives are available."}) // Modified line
+				utils.RespondJSON(w, http.StatusConflict, map[string]string{"message": "Could not book seats together for the requested show, and no same-day alternatives are available."})
 			}
 		} else {
 			utils.RespondError(w, http.StatusInternalServerError, err.Error())

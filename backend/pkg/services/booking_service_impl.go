@@ -31,17 +31,62 @@ type BookingServiceImpl struct{}
 
 // CreateBooking attempts to find and book a contiguous block of seats for a specific show.
 func (s *BookingServiceImpl) CreateBooking(request BookingRequest) (models.Booking, error) {
-	// 1. Find the specific show using a direct and efficient query.
+	// 1. Parse the request time to handle different formats and timezones
+	requestTime, err := time.Parse(time.RFC3339, request.Time)
+	if err != nil {
+		// Try parsing with other common formats
+		formats := []string{
+			"2006-01-02T15:04:05Z",
+			"2006-01-02T15:04:05.000Z",
+			"2006-01-02 15:04:05",
+			"2006-01-02T15:04:05+05:30", // IST timezone
+		}
+		for _, format := range formats {
+			if requestTime, err = time.Parse(format, request.Time); err == nil {
+				break
+			}
+		}
+		if err != nil {
+			return models.Booking{}, fmt.Errorf("invalid time format: %w", err)
+		}
+	}
+
+	// Convert to UTC for consistent comparison
+	requestTime = requestTime.UTC()
+
+	// 2. Find the specific show using a more flexible time comparison
 	var targetShow models.Show
-	row := database.DB.QueryRow("SELECT id, movie_id, hall_id, time FROM shows WHERE movie_id = ? AND hall_id = ? AND time = ?", request.MovieID, request.HallID, request.Time)
+	row := database.DB.QueryRow("SELECT id, movie_id, hall_id, time FROM shows WHERE movie_id = ? AND hall_id = ?", request.MovieID, request.HallID)
 	if err := row.Scan(&targetShow.ID, &targetShow.MovieID, &targetShow.HallID, &targetShow.Time); err != nil {
 		if err == sql.ErrNoRows {
-			return models.Booking{}, fmt.Errorf("no show found for the given movie, hall, and time")
+			return models.Booking{}, fmt.Errorf("no show found for the given movie and hall")
 		}
 		return models.Booking{}, err
 	}
 
-	// 2. Find a contiguous block of available seats.
+	// 3. Parse the show time and compare
+	showTime, err := time.Parse(time.RFC3339, targetShow.Time)
+	if err != nil {
+		return models.Booking{}, fmt.Errorf("invalid show time format in database: %w", err)
+	}
+
+	// Convert show time to UTC for consistent comparison
+	showTime = showTime.UTC()
+
+	// 4. Check if the times match (within 1 minute tolerance)
+	requestTimeTruncated := requestTime.Truncate(time.Minute)
+	showTimeTruncated := showTime.Truncate(time.Minute)
+
+	// Debug logging
+	log.Printf("Booking time comparison - Request: %s (UTC), Show: %s (UTC)",
+		requestTimeTruncated.Format(time.RFC3339),
+		showTimeTruncated.Format(time.RFC3339))
+
+	if !requestTimeTruncated.Equal(showTimeTruncated) {
+		return models.Booking{}, fmt.Errorf("no show found for the given movie, hall, and time")
+	}
+
+	// 5. Find a contiguous block of available seats.
 	hall, err := (&HallServiceImpl{}).GetHall(targetShow.HallID)
 	if err != nil {
 		return models.Booking{}, fmt.Errorf("could not get hall %s: %w", targetShow.HallID, err)
@@ -187,10 +232,27 @@ func (s *BookingServiceImpl) FindAlternativeShows(originalTime string, numSeats 
 	// 1. Determine the date range for the same day.
 	parsedTime, err := time.Parse(time.RFC3339, originalTime)
 	if err != nil {
-		return nil, fmt.Errorf("invalid time format: %w", err)
+		// Try parsing with other common formats
+		formats := []string{
+			"2006-01-02T15:04:05Z",
+			"2006-01-02T15:04:05.000Z",
+			"2006-01-02 15:04:05",
+			"2006-01-02T15:04:05+05:30", // IST timezone
+		}
+		for _, format := range formats {
+			if parsedTime, err = time.Parse(format, originalTime); err == nil {
+				break
+			}
+		}
+		if err != nil {
+			return nil, fmt.Errorf("invalid time format: %w", err)
+		}
 	}
+
+	// Convert to UTC for consistent comparison
+	parsedTime = parsedTime.UTC()
 	year, month, day := parsedTime.Date()
-	startOfDay := time.Date(year, month, day, 0, 0, 0, 0, parsedTime.Location())
+	startOfDay := time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
 	endOfDay := startOfDay.Add(24 * time.Hour)
 
 	// 2. Get all shows within that day.

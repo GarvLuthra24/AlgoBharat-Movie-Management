@@ -123,7 +123,7 @@ function AnalyticsDashboard() {
                       💰 Total Revenue for {movies.find((m) => m.id === selectedMovie)?.title}:
                     </Title>
                     <Text strong style={{ fontSize: '2em', color: '#1890ff' }}>
-                      ${revenue.toFixed(2)}
+                      ₹ {revenue.toFixed(2)}
                     </Text>
                   </Card>
               )}

@@ -148,7 +148,7 @@ function ShowManagement() {
       title: 'Price',
       dataIndex: 'price',
       key: 'price',
-      render: (price) => `$${price.toFixed(2)}`,
+      render: (price) => `₹ ${price.toFixed(2)}`,
     },
     {
       title: 'Action',

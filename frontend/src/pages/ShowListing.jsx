@@ -132,9 +132,12 @@ function ShowListing() {
       const bookingRequest = {
         movieId: selectedShow.movie_id,
         hallId: selectedShow.hall_id,
-        time: selectedShow.time,
+        time: selectedShow.time, // This should already be in UTC format from the server
         numSeats,
       };
+      
+      // Debug logging
+      console.log('Booking request time:', selectedShow.time);
 
       await axios.post(`${API_BASE_URL}/bookings`, bookingRequest, {
         headers: { Authorization: `Bearer ${token}` },
@@ -232,7 +235,7 @@ function ShowListing() {
                                   {hall ? hall.name : "N/A"}
                                 </p>
                                 <p>
-                                  <Text strong>Price:</Text> $
+                                  <Text strong>Price:</Text> ₹
                                   {show.price ? show.price.toFixed(2) : "N/A"}
                                 </p>
                               </Card>

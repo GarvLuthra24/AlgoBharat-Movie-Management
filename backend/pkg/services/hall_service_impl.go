@@ -101,7 +101,7 @@ func (s *HallServiceImpl) CreateHall(hall models.Hall) (models.Hall, error) {
 					Number: i,
 					HallID: hall.ID,
 				}
-				seatStmt, err := database.DB.Prepare("INSERT INTO seats(id, row, number, hall_id, column) VALUES(?, ?, ?, ?, ?)")
+				seatStmt, err := database.DB.Prepare("INSERT INTO seats(id, `row`, `number`, hall_id, `column`) VALUES(?, ?, ?, ?, ?)")
 				if err != nil {
 					return models.Hall{}, err
 				}
@@ -118,7 +118,7 @@ func (s *HallServiceImpl) CreateHall(hall models.Hall) (models.Hall, error) {
 }
 
 func (s *HallServiceImpl) GetHallSeats(hallID string) ([]models.Seat, error) {
-	rows, err := database.DB.Query("SELECT id, row, number, hall_id, column FROM seats WHERE hall_id = ?", hallID)
+	rows, err := database.DB.Query("SELECT id, `row`, `number`, hall_id, `column` FROM seats WHERE hall_id = ?", hallID)
 	if err != nil {
 		return nil, err
 	}
