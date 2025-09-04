@@ -80,7 +80,7 @@ function AppContent() {
         </Routes>
       </Content>
       <Footer style={{ textAlign: 'center' }}>
-        AlgoBharat ©2024 Created by You
+        AlgoBharat ©2025 Created by Garv Luthra
       </Footer>
       <ToastContainer position="bottom-right" autoClose={3000} hideProgressBar={false} newestOnTop={false} closeOnClick rtl={false} pauseOnFocusLoss draggable pauseOnHover />
     </Layout>
