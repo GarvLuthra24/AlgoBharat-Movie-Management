@@ -65,7 +65,8 @@ func (s *ShowServiceImpl) CreateShow(show models.Show) (models.Show, error) {
 		existingMovie, err := movieService.GetMovie(existingShow.MovieID)
 		if err != nil {
 			log.Printf("Could not get existing movie details for show %s: %v", existingShow.ID, err)
-			continue		}
+			continue
+		}
 
 		existingShowStartTime, err := time.Parse(time.RFC3339, existingShow.Time)
 		if err != nil {

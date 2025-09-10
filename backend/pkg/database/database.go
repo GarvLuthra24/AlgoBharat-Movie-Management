@@ -122,7 +122,18 @@ func createTables() {
 	CREATE TABLE IF NOT EXISTS bookings (
 		id VARCHAR(36) PRIMARY KEY,
 		show_id VARCHAR(36),
-		seat_ids TEXT
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+	    seat_ids TEXT
+	);
+	`
+
+	createBookedSeatsTable := `
+	CREATE TABLE IF NOT EXISTS booked_seats (
+		show_id VARCHAR(36),
+		seat_id VARCHAR(36),
+		booking_id VARCHAR(36),
+		PRIMARY KEY (show_id, seat_id),
+		FOREIGN KEY (booking_id) REFERENCES bookings(id) ON DELETE CASCADE
 	);
 	`
 
@@ -135,18 +146,20 @@ func createTables() {
 	);
 	`
 
-	_, err := DB.Exec(createMoviesTable +
-		createTheatresTable +
-		createHallsTable +
-		createShowsTable +
-		createSeatsTable +
-		createBookingsTable +
-		createUsersTable)
+	_, err := DB.Exec(
+		createMoviesTable +
+			createTheatresTable +
+			createHallsTable +
+			createShowsTable +
+			createSeatsTable +
+			createBookingsTable +
+			createBookedSeatsTable +
+			createUsersTable,
+	)
 	if err != nil {
 		log.Fatal(err)
 	}
 }
-
 
 func createDefaultAdmin() {
 	// Check if admin user already exists

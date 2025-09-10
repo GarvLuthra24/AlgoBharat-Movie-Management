@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/go-sql-driver/mysql"
 	"log"
 	"math/rand"
 	"sort"
@@ -29,17 +30,15 @@ func (e *ErrNoContiguousSeats) Error() string {
 
 type BookingServiceImpl struct{}
 
-// CreateBooking attempts to find and book a contiguous block of seats for a specific show.
 func (s *BookingServiceImpl) CreateBooking(request BookingRequest) (models.Booking, error) {
-	// 1. Parse the request time to handle different formats and timezones
+	// 1. Parse the request time
 	requestTime, err := time.Parse(time.RFC3339, request.Time)
 	if err != nil {
-		// Try parsing with other common formats
 		formats := []string{
 			"2006-01-02T15:04:05Z",
 			"2006-01-02T15:04:05.000Z",
 			"2006-01-02 15:04:05",
-			"2006-01-02T15:04:05+05:30", // IST timezone
+			"2006-01-02T15:04:05+05:30",
 		}
 		for _, format := range formats {
 			if requestTime, err = time.Parse(format, request.Time); err == nil {
@@ -50,12 +49,11 @@ func (s *BookingServiceImpl) CreateBooking(request BookingRequest) (models.Booki
 			return models.Booking{}, fmt.Errorf("invalid time format: %w", err)
 		}
 	}
-
-	// Convert to UTC for consistent comparison
 	requestTime = requestTime.UTC()
 
-	// 2. Find the specific show using a more flexible time comparison
+	// 2. Find target show
 	var targetShow models.Show
+	// we should also be sending the time to get that particular show
 	row := database.DB.QueryRow("SELECT id, movie_id, hall_id, time FROM shows WHERE movie_id = ? AND hall_id = ?", request.MovieID, request.HallID)
 	if err := row.Scan(&targetShow.ID, &targetShow.MovieID, &targetShow.HallID, &targetShow.Time); err != nil {
 		if err == sql.ErrNoRows {
@@ -64,35 +62,22 @@ func (s *BookingServiceImpl) CreateBooking(request BookingRequest) (models.Booki
 		return models.Booking{}, err
 	}
 
-	// 3. Parse the show time and compare
 	showTime, err := time.Parse(time.RFC3339, targetShow.Time)
 	if err != nil {
 		return models.Booking{}, fmt.Errorf("invalid show time format in database: %w", err)
 	}
-
-	// Convert show time to UTC for consistent comparison
 	showTime = showTime.UTC()
 
-	// 4. Check if the times match (within 1 minute tolerance)
-	requestTimeTruncated := requestTime.Truncate(time.Minute)
-	showTimeTruncated := showTime.Truncate(time.Minute)
-
-	// Debug logging
-	log.Printf("Booking time comparison - Request: %s (UTC), Show: %s (UTC)",
-		requestTimeTruncated.Format(time.RFC3339),
-		showTimeTruncated.Format(time.RFC3339))
-
-	if !requestTimeTruncated.Equal(showTimeTruncated) {
+	if !requestTime.Truncate(time.Minute).Equal(showTime.Truncate(time.Minute)) {
 		return models.Booking{}, fmt.Errorf("no show found for the given movie, hall, and time")
 	}
 
-	// 5. Find a contiguous block of available seats.
+	// 3. Get Hall and prepare seats
 	hall, err := (&HallServiceImpl{}).GetHall(targetShow.HallID)
 	if err != nil {
 		return models.Booking{}, fmt.Errorf("could not get hall %s: %w", targetShow.HallID, err)
 	}
 
-	// Re-organize hall seats by row and then by column and number for easier contiguous check
 	seatsByRow := make(map[int][]models.Seat)
 	for rowKeyStr, cols := range hall.SeatMap {
 		rowNum, _ := strconv.Atoi(rowKeyStr)
@@ -100,13 +85,16 @@ func (s *BookingServiceImpl) CreateBooking(request BookingRequest) (models.Booki
 			for i := 1; i <= numSeats; i++ {
 				seatID := fmt.Sprintf("%d-%d-%d", rowNum, colIndex+1, i)
 				seatsByRow[rowNum] = append(seatsByRow[rowNum], models.Seat{
-					ID: seatID, Row: rowNum, Column: colIndex + 1, Number: i, HallID: hall.ID,
+					ID:     seatID,
+					Row:    rowNum,
+					Column: colIndex + 1,
+					Number: i,
+					HallID: hall.ID,
 				})
 			}
 		}
 	}
 
-	// Sort seats within each row for consistent contiguous checking
 	for rowNum := range seatsByRow {
 		sort.Slice(seatsByRow[rowNum], func(i, j int) bool {
 			if seatsByRow[rowNum][i].Column != seatsByRow[rowNum][j].Column {
@@ -124,7 +112,6 @@ func (s *BookingServiceImpl) CreateBooking(request BookingRequest) (models.Booki
 	var seatsToBook []models.Seat
 	foundBlock := false
 
-	// Iterate through rows in ascending order
 	var rowNums []int
 	for rNum := range seatsByRow {
 		rowNums = append(rowNums, rNum)
@@ -142,13 +129,9 @@ func (s *BookingServiceImpl) CreateBooking(request BookingRequest) (models.Booki
 				currentContiguousCount = 0
 				potentialBlock = []models.Seat{}
 			} else {
-				// Check for contiguity within the same column group
-				// A seat is contiguous if it's in the same row, same column, and is the next number
 				if currentContiguousCount > 0 {
 					prevSeat := potentialBlock[len(potentialBlock)-1]
-					// Check if current seat is in the same column and is the next number
 					isContiguous := (seat.Column == prevSeat.Column && seat.Number == prevSeat.Number+1)
-
 					if !isContiguous {
 						currentContiguousCount = 0
 						potentialBlock = []models.Seat{}
@@ -159,7 +142,7 @@ func (s *BookingServiceImpl) CreateBooking(request BookingRequest) (models.Booki
 				potentialBlock = append(potentialBlock, seat)
 
 				if currentContiguousCount >= request.NumSeats {
-					seatsToBook = potentialBlock[:request.NumSeats] // Take only the required number of seats
+					seatsToBook = potentialBlock[:request.NumSeats]
 					foundBlock = true
 					break
 				}
@@ -174,31 +157,17 @@ func (s *BookingServiceImpl) CreateBooking(request BookingRequest) (models.Booki
 		return models.Booking{}, &ErrNoContiguousSeats{}
 	}
 
-	// 3. Atomically book the found seats.
-	var seatIDsToBook []string
-	for _, seat := range seatsToBook {
-		seatIDsToBook = append(seatIDsToBook, seat.ID)
+	seatIDsToBook := make([]string, len(seatsToBook))
+	for i, seat := range seatsToBook {
+		seatIDsToBook[i] = seat.ID
 	}
 
+	// 4. Transactional booking with seat_ids and new booked_seats
 	tx, err := database.DB.Begin()
 	if err != nil {
 		return models.Booking{}, err
 	}
 	defer tx.Rollback()
-
-	// Double-check seats within the transaction to prevent race conditions.
-	for _, seatID := range seatIDsToBook {
-		var count int
-		// Check if any existing booking contains this exact seatID
-		// Using INSTR for partial match within the JSON string of seat_ids
-		err := tx.QueryRow("SELECT COUNT(*) FROM bookings WHERE show_id = ? AND INSTR(seat_ids, ?)", targetShow.ID, `"`+seatID+`"`).Scan(&count)
-		if err != nil {
-			return models.Booking{}, err
-		}
-		if count > 0 {
-			return models.Booking{}, fmt.Errorf("seat %s is already booked", seatID)
-		}
-	}
 
 	newBooking := models.Booking{
 		ID:      strconv.Itoa(rand.Intn(1000000)),
@@ -209,15 +178,33 @@ func (s *BookingServiceImpl) CreateBooking(request BookingRequest) (models.Booki
 	seatIDsBytes, _ := json.Marshal(newBooking.SeatIDs)
 	seatIDsStr := string(seatIDsBytes)
 
-	stmt, err := tx.Prepare("INSERT INTO bookings(id, show_id, seat_ids) VALUES(?, ?, ?)")
+	// Insert booking with seat_ids
+	stmtBooking, err := tx.Prepare("INSERT INTO bookings(id, show_id, seat_ids) VALUES(?, ?, ?)")
 	if err != nil {
 		return models.Booking{}, err
 	}
-	defer stmt.Close()
+	defer stmtBooking.Close()
 
-	_, err = stmt.Exec(newBooking.ID, newBooking.ShowID, seatIDsStr)
+	_, err = stmtBooking.Exec(newBooking.ID, newBooking.ShowID, seatIDsStr)
 	if err != nil {
 		return models.Booking{}, err
+	}
+
+	// Insert booked_seats with atomic constraint
+	stmtSeat, err := tx.Prepare("INSERT INTO booked_seats(show_id, seat_id, booking_id) VALUES(?, ?, ?)")
+	if err != nil {
+		return models.Booking{}, err
+	}
+	defer stmtSeat.Close()
+
+	for _, seatID := range seatIDsToBook {
+		_, err := stmtSeat.Exec(newBooking.ShowID, seatID, newBooking.ID)
+		if err != nil {
+			if mysqlErr, ok := err.(*mysql.MySQLError); ok && mysqlErr.Number == 1062 {
+				return models.Booking{}, fmt.Errorf("seat %s is already booked", seatID)
+			}
+			return models.Booking{}, err
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -232,12 +219,11 @@ func (s *BookingServiceImpl) FindAlternativeShows(originalTime string, numSeats 
 	// 1. Determine the date range for the same day.
 	parsedTime, err := time.Parse(time.RFC3339, originalTime)
 	if err != nil {
-		// Try parsing with other common formats
 		formats := []string{
 			"2006-01-02T15:04:05Z",
 			"2006-01-02T15:04:05.000Z",
 			"2006-01-02 15:04:05",
-			"2006-01-02T15:04:05+05:30", // IST timezone
+			"2006-01-02T15:04:05+05:30",
 		}
 		for _, format := range formats {
 			if parsedTime, err = time.Parse(format, originalTime); err == nil {
@@ -249,14 +235,17 @@ func (s *BookingServiceImpl) FindAlternativeShows(originalTime string, numSeats 
 		}
 	}
 
-	// Convert to UTC for consistent comparison
 	parsedTime = parsedTime.UTC()
 	year, month, day := parsedTime.Date()
 	startOfDay := time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
 	endOfDay := startOfDay.Add(24 * time.Hour)
 
 	// 2. Get all shows within that day.
-	rows, err := database.DB.Query("SELECT id, movie_id, hall_id, time FROM shows WHERE time >= ? AND time < ?", startOfDay.Format(time.RFC3339), endOfDay.Format(time.RFC3339))
+	rows, err := database.DB.Query(
+		"SELECT id, movie_id, hall_id, time FROM shows WHERE time >= ? AND time < ?",
+		startOfDay.Format(time.RFC3339),
+		endOfDay.Format(time.RFC3339),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -272,7 +261,7 @@ func (s *BookingServiceImpl) FindAlternativeShows(originalTime string, numSeats 
 		sameDayShows = append(sameDayShows, show)
 	}
 
-	// 3. Check each same-day show for consecutive seats.
+	// 3. Check each same-day show for consecutive available seats.
 	var alternatives []models.Show
 	for _, show := range sameDayShows {
 		hall, err := (&HallServiceImpl{}).GetHall(show.HallID)
@@ -281,7 +270,6 @@ func (s *BookingServiceImpl) FindAlternativeShows(originalTime string, numSeats 
 			continue
 		}
 
-		// Re-organize hall seats by row and column for easier contiguous check
 		seatsByRow := make(map[int][]models.Seat)
 		for rowKeyStr, cols := range hall.SeatMap {
 			rowNum, _ := strconv.Atoi(rowKeyStr)
@@ -289,13 +277,16 @@ func (s *BookingServiceImpl) FindAlternativeShows(originalTime string, numSeats 
 				for i := 1; i <= numSeats; i++ {
 					seatID := fmt.Sprintf("%d-%d-%d", rowNum, colIndex+1, i)
 					seatsByRow[rowNum] = append(seatsByRow[rowNum], models.Seat{
-						ID: seatID, Row: rowNum, Column: colIndex + 1, Number: i, HallID: hall.ID,
+						ID:     seatID,
+						Row:    rowNum,
+						Column: colIndex + 1,
+						Number: i,
+						HallID: hall.ID,
 					})
 				}
 			}
 		}
 
-		// Sort seats within each row for consistent contiguous checking
 		for rowNum := range seatsByRow {
 			sort.Slice(seatsByRow[rowNum], func(i, j int) bool {
 				if seatsByRow[rowNum][i].Column != seatsByRow[rowNum][j].Column {
@@ -305,6 +296,7 @@ func (s *BookingServiceImpl) FindAlternativeShows(originalTime string, numSeats 
 			})
 		}
 
+		// NEW: Consistently use booked_seats table
 		bookedSeatIDs, err := s.getBookedSeatIDsForShow(show.ID)
 		if err != nil {
 			log.Printf("Could not get booked seats for show %s: %v", show.ID, err)
@@ -312,13 +304,13 @@ func (s *BookingServiceImpl) FindAlternativeShows(originalTime string, numSeats 
 		}
 
 		foundAlternative := false
-		var rowNumsAlt []int
+		var rowNums []int
 		for rNum := range seatsByRow {
-			rowNumsAlt = append(rowNumsAlt, rNum)
+			rowNums = append(rowNums, rNum)
 		}
-		sort.Ints(rowNumsAlt)
+		sort.Ints(rowNums)
 
-		for _, rowNum := range rowNumsAlt {
+		for _, rowNum := range rowNums {
 			seatsInRow := seatsByRow[rowNum]
 
 			currentContiguousCount := 0
@@ -329,10 +321,8 @@ func (s *BookingServiceImpl) FindAlternativeShows(originalTime string, numSeats 
 					currentContiguousCount = 0
 					potentialBlock = []models.Seat{}
 				} else {
-					// Check for contiguity within the same column group
 					if currentContiguousCount > 0 {
 						prevSeat := potentialBlock[len(potentialBlock)-1]
-						// Check if current seat is in the same column and is the next number
 						isContiguous := (seat.Column == prevSeat.Column && seat.Number == prevSeat.Number+1)
 
 						if !isContiguous {
@@ -350,6 +340,7 @@ func (s *BookingServiceImpl) FindAlternativeShows(originalTime string, numSeats 
 					}
 				}
 			}
+
 			if foundAlternative {
 				alternatives = append(alternatives, show)
 				break
@@ -362,29 +353,23 @@ func (s *BookingServiceImpl) FindAlternativeShows(originalTime string, numSeats 
 
 // getBookedSeatIDsForShow is a helper to get all booked seat IDs for a given show.
 func (s *BookingServiceImpl) getBookedSeatIDsForShow(showID string) (map[string]bool, error) {
-	rows, err := database.DB.Query("SELECT id, show_id, seat_ids FROM bookings WHERE show_id = ?", showID)
+	bookedMap := make(map[string]bool)
+
+	// Prefer querying booked_seats directly to get atomic data
+	rows, err := database.DB.Query("SELECT seat_id FROM booked_seats WHERE show_id = ?", showID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	bookedMap := make(map[string]bool)
 	for rows.Next() {
-		var booking models.Booking
-		var seatIDsStr string
-		if err := rows.Scan(&booking.ID, &booking.ShowID, &seatIDsStr); err != nil {
+		var seatID string
+		if err := rows.Scan(&seatID); err != nil {
 			return nil, err
 		}
-
-		var seatIDs []string
-		if err := json.Unmarshal([]byte(seatIDsStr), &seatIDs); err != nil {
-			return nil, err
-		}
-
-		for _, id := range seatIDs {
-			bookedMap[id] = true
-		}
+		bookedMap[seatID] = true
 	}
+
 	return bookedMap, nil
 }
 
